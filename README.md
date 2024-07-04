@@ -1,5 +1,5 @@
 # Simple Wumpus World Game
-Simple single file wumpus world game.
+Simple single file wumpus world game using Javascript, CSS and HTML.
 
 ## Agent Capabilities
 Avoids Pits;
