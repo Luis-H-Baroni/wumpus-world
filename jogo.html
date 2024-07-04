@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wumpus World</title>
+    <style>
+        #game-board {
+            display: grid;
+            grid-template-columns: repeat(4, 50px);
+            grid-template-rows: repeat(4, 50px);
+            gap: 2px;
+        }
+
+        .cell {
+            width: 50px;
+            height: 50px;
+            border: 1px solid black;
+            display: flex;
+            flex-flow: column;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            height: 100%;
+        }
+
+        .agent {
+            background-color: lightblue;
+            height: 100%;
+            width: 100%;
+            justify-content: center;
+            align-items: center;
+            display: flex;
+        }
+
+        .wumpus {
+            background-color: red;
+            height: 100%;
+            width: 100%;
+            justify-content: center;
+            align-items: center;
+            display: flex;
+        }
+
+        .pit {
+            background-color: black;
+            height: 100%;
+            width: 100%;
+            justify-content: center;
+            align-items: center;
+            display: flex;
+        }
+
+        .gold {
+            background-color: yellow;
+            height: 100%;
+            width: 100%;
+            justify-content: center;
+            align-items: center;
+            display: flex;
+        }
+
+        .breeze::after {
+            content: "💨";
+        }
+
+        .stench::after {
+            content: "💀";
+        }
+
+        .glitter::after {
+            content: "✨";
+        }
+
+        .identifier {
+            font-size: 10px;
+            display: flex;
+            align-items: flex-start;
+            justify-content: flex-start;
+            border: 0;
+            margin: 0;
+
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Wumpus World</h1>
+    <div id="game-board"></div>
+    <p id="status"></p>
+    <p id="score">Score: 0</p>
+    <button onclick="move('forward')">Forward</button>
+    <button onclick="turn('left')">Left</button>
+    <button onclick="turn('right')">Right</button>
+    <button onclick="grab()">Grab</button>
+    <button onclick="shoot()">Shoot</button>
+
+
+    <script>
+        const SIZE = 4;
+        let board = Array(SIZE).fill().map(() => Array(SIZE).fill(' '));
+        let agentPosition = { x: 0, y: 3 };
+        let agentDirection = 'right';
+        let score = 0;
+        let hasArrow = true;
+        let goldPosition;
+        let wumpusPosition;
+        let isWumpusAlive = true;
+        let agentKnowledge = [];
+        let endedGame = false;
+        let moved = false;
+        let discoveredWumpus = { found: false, relativePosition: null }
+
+        async function run() {
+            await initializeBoard();
+            await drawBoard();
+            await nextMove(agentKnowledge)
+        }
+
+        // Initialize the board with Wumpus, gold, and pits
+        function initializeBoard() {
+            // Place gold and Wumpus at random positions
+            goldPosition = {x:3,y:0}//getRandomPosition();
+            board[goldPosition.y][goldPosition.x] = 'G';
+
+            wumpusPosition = {x:2,y:0}//getRandomPosition();
+            while (wumpusPosition.x === goldPosition.x && wumpusPosition.y === goldPosition.y) {
+                wumpusPosition = getRandomPosition();
+            }
+            board[wumpusPosition.y][wumpusPosition.x] = 'W';
+
+            // Place pits with a probability of 0.2
+            for (let y = 0; y < SIZE; y++) {
+                for (let x = 0; x < SIZE; x++) {
+                    if (x === 0 && y === 3) continue;
+                    if (x === 1 && y === 3) continue;
+                    if (x === 0 && y === 2) continue;
+                    if (Math.random() < 0.2 && board[y][x] === ' ') {
+                        board[y][x] = 'P';
+                    }
+                }
+            }
+
+            // Initialize agent's knowledge
+            const status = { visited: false, safe: false, breeze: false, stench: false, glitter: false }
+            const createMatrix = (x, y) => Array.from({ length: x }, () =>
+                Array.from({ length: y }, () => ({ ...status }))
+            );
+            agentKnowledge = createMatrix(4, 4)
+            agentKnowledge[agentPosition.x][agentPosition.y].safe = true;
+            agentKnowledge[agentPosition.x][agentPosition.y].visited = true;
+            agentKnowledge[0][2].safe = true;
+            agentKnowledge[1][3].safe = true;
+            console.log(`agent x${agentPosition.x}, y${agentPosition.y}`)
+            console.log(agentKnowledge)
+
+
+        }
+
+        // Get a random position on the board
+        function getRandomPosition() {
+            const position = { x: Math.floor(Math.random() * SIZE), y: Math.floor(Math.random() * SIZE) };
+            console.log(position)
+            if (position.x === 0 && position.y === 3) return getRandomPosition()
+            if (position.x === 0 && position.y === 2) return getRandomPosition()
+            if (position.x === 1 && position.y === 3) return getRandomPosition()
+            return position
+        }
+
+        // Draw the board
+        function drawBoard() {
+            const gameBoard = document.getElementById('game-board');
+            gameBoard.innerHTML = '';
+            for (let y = 0; y < SIZE; y++) {
+                for (let x = 0; x < SIZE; x++) {
+                    const cell = document.createElement('div');
+                    cell.classList.add('cell');
+                    const content = document.createElement('div')
+
+                    const identifier = document.createElement('p')
+                    identifier.classList.add('identifier')
+                    identifier.innerHTML = `${x}, ${y}`
+
+                    cell.appendChild(identifier)
+                    cell.appendChild(content)
+                    if (x === agentPosition.x && y === agentPosition.y) {
+                        let arrowDirection
+
+                        switch (agentDirection) {
+                            case 'up': arrowDirection = '^'; break;
+                            case 'down': arrowDirection = 'v'; break;
+                            case 'left': arrowDirection = '<'; break;
+                            case 'right': arrowDirection = '>'; break;
+                        }
+                        content.classList.add('agent');
+                        content.textContent = arrowDirection;
+                    } else {
+                        switch (board[y][x]) {
+                            case 'W':
+                                if (isWumpusAlive) {
+                                    content.classList.add('wumpus');
+                                    content.textContent = 'W';
+                                } else {
+
+                                }
+
+                                break;
+                            case 'P':
+                                content.classList.add('pit');
+                                content.textContent = 'P';
+                                break;
+                            case 'G':
+                                content.classList.add('gold');
+                                content.textContent = 'G';
+                                break;
+                        }
+                    }
+                    if (isAdjacentTo({ x, y }, wumpusPosition)) {
+                        if (isWumpusAlive) content.classList.add('stench');
+                    }
+                    if (isAdjacentTo({ x, y }, goldPosition)) {
+                        content.classList.add('glitter');
+                    }
+                    if (isAdjacentToPit({ x, y })) {
+                        content.classList.add('breeze');
+                    }
+                    gameBoard.appendChild(cell);
+                }
+            }
+            const scorePoints = document.getElementById('score')
+            scorePoints.innerText = `Score: ${score}`
+            console.log('------------ board updated ------------')
+        }
+
+        function isAdjacentTo(pos1, pos2) {
+            return (
+                Math.abs(pos1.x - pos2.x) + Math.abs(pos1.y - pos2.y) === 1
+            );
+        }
+
+        function isAdjacentToPit(pos) {
+            for (let y = 0; y < SIZE; y++) {
+                for (let x = 0; x < SIZE; x++) {
+                    if (board[y][x] === 'P' && isAdjacentTo(pos, { x, y })) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        async function move(direction) {
+            if (endedGame) return;
+            await delay(500)
+            let newX = agentPosition.x;
+            let newY = agentPosition.y;
+
+            switch (agentDirection) {
+                case 'up': newY--; break;
+                case 'down': newY++; break;
+                case 'left': newX--; break;
+                case 'right': newX++; break;
+            }
+
+            if (newX >= 0 && newX < SIZE && newY >= 0 && newY < SIZE) {
+                agentPosition.x = newX;
+                agentPosition.y = newY;
+                score -= 1;
+                await checkStatus();
+                await drawBoard();
+                await updateKnowledge();
+
+
+            } else {
+                document.getElementById('status').textContent = 'Impact on wall!';
+            }
+
+
+        }
+
+        async function turn(direction) {
+            if (endedGame) return;
+
+            switch (direction) {
+                case 'left':
+                    agentDirection = (agentDirection === 'up') ? 'left' :
+                        (agentDirection === 'left') ? 'down' :
+                            (agentDirection === 'down') ? 'right' :
+                                'up';
+                    break;
+                case 'right':
+                    agentDirection = (agentDirection === 'up') ? 'right' :
+                        (agentDirection === 'right') ? 'down' :
+                            (agentDirection === 'down') ? 'left' :
+                                'up';
+                    break;
+            }
+            console.log("agentDirection after turn", agentDirection)
+
+            score -= 1;
+            await delay(500)
+            await drawBoard();
+        }
+
+        function grab() {
+            if (endedGame) return;
+            console.log('trying to grab')
+
+            if (agentPosition.x === goldPosition.x && agentPosition.y === goldPosition.y) {
+                score += 1000;
+                console.log('gold found')
+                document.getElementById('status').textContent = 'You found the gold! You win!';
+                endedGame = true
+            } else {
+                document.getElementById('status').textContent = 'Nothing to grab here.';
+            }
+            drawBoard();
+        }
+
+        async function shoot(direction) {
+            if (endedGame) return;
+
+            if (hasArrow) {
+                score -= 10;
+                let hit = false;
+                let arrowX = agentPosition.x;
+                let arrowY = agentPosition.y;
+                while (agentDirection !== direction) { await turn('right') }
+                while (!hit && arrowX >= 0 && arrowX < SIZE && arrowY >= 0 && arrowY < SIZE) {
+                    switch (agentDirection) {
+                        case 'up': arrowY--; break;
+                        case 'down': arrowY++; break;
+                        case 'left': arrowX--; break;
+                        case 'right': arrowX++; break;
+                    }
+                    if (arrowX === wumpusPosition.x && arrowY === wumpusPosition.y) {
+                        isWumpusAlive = false;
+                        hit = true;
+                        document.getElementById('status').textContent = 'You killed the Wumpus!';
+                        await cleanWumpusFromKnowledge()
+
+                    }
+                }
+                if (!hit) {
+                    document.getElementById('status').textContent = 'Arrow missed.';
+                }
+                hasArrow = false;
+                await drawBoard();
+            } else {
+                document.getElementById('status').textContent = 'No arrows left.';
+            }
+        }
+
+        function cleanWumpusFromKnowledge() {
+            const adjacents = getAdjacentPositions(wumpusPosition)
+            agentKnowledge[wumpusPosition.x][wumpusPosition.y].safe = true
+            adjacents.forEach(pos => {
+                console.log('position around wumpus', pos.x, pos.y)
+                agentKnowledge[pos.x][pos.y].stench = false
+
+                const adjacentsOfAdjacent = getAdjacentPositions(pos)
+
+                adjacentsOfAdjacent.forEach(AdjPos => {
+                    console.log('position around wumpus', pos.x, pos.y, 'adjacent', AdjPos.x, AdjPos.y)
+                    agentKnowledge[AdjPos.x][AdjPos.y].potentialWumpus = false
+                })
+            })
+        }
+
+        function checkStatus() {
+            const cell = board[agentPosition.y][agentPosition.x];
+            if (cell === 'W' && isWumpusAlive) {
+                score -= 1000;
+                document.getElementById('status').textContent = 'Game Over! You encountered the Wumpus.';
+                endedGame = true
+            } else if (cell === 'P') {
+                score -= 1000;
+                document.getElementById('status').textContent = 'Game Over! You fell into a pit.';
+                endedGame = true
+            } else {
+                document.getElementById('status').textContent = '';
+            }
+        }
+
+        async function delay(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        async function moveTo(target, current) {
+            if (endedGame) return;
+            if (current.x === target.x && current.y === target.y) return
+            console.log('moving to', target)
+
+            let sameColumn = false
+            let sameRow = false
+            let isAbove = false
+            let isBellow = false
+            let isLeft = false
+            let isRight = false
+
+            if (current.x === target.x) sameColumn = true
+            if (current.y === target.y) sameRow = true
+
+            if (sameColumn) {
+                if (current.y > target.y) isAbove = true
+                if (current.y < target.y) isBellow = true
+
+                if (isAbove) {
+                    while (agentDirection !== 'up') {
+                        if (agentDirection === "right") await turn('left')
+                        else await turn('right')
+                    }
+                    await move()
+                } else if (isBellow) {
+                    while (agentDirection !== 'down') { await turn('left') }
+                    await move()
+                }
+            }
+            if (sameRow) {
+                if (current.x > target.x) isLeft = true
+                if (current.x < target.x) isRight = true
+
+                if (isRight) {
+                    while (agentDirection !== 'right') {
+                        if (agentDirection === 'up') await turn('right')
+                        else await turn('left')
+                    }
+                    await move()
+                } else if (isLeft) {
+                    while (agentDirection !== 'left') { await turn('left') }
+                    await move()
+                }
+            }
+
+
+            if (agentKnowledge[agentPosition.x][agentPosition.y].potentialGold) await grab()
+
+
+
+        }
+
+
+
+        async function nextMove(agentKnowledge) {
+            if (endedGame) return;
+            console.log('calculating next move');
+            let optimalMove = null;
+            let safestMove = null;
+
+            if (discoveredWumpus.found) await shoot(discoveredWumpus.relativePosition)
+
+            const adjacents = getAdjacentPositions(agentPosition);
+
+            for (const pos of adjacents) {
+                const { x, y } = pos;
+
+                if (agentKnowledge[x][y].safe && !agentKnowledge[x][y].visited) {
+                    console.log(`x${x}, y${y} is safe, moving`);
+                    optimalMove = { x, y };
+                    break;
+                } else if (!agentKnowledge[x][y].safe && !agentKnowledge[x][y].potentialWumpus && !agentKnowledge[x][y].potentialPit) {
+                    console.log(`x${x}, y${y} is not safe but also not dangerous, considering`);
+                    safestMove = { x, y };
+                }
+            }
+
+            if (!optimalMove) {
+                if (safestMove) {
+                    console.log('no optimal move, taking safest move');
+                    await moveTo(safestMove, agentPosition);
+                } else {
+                    console.log('no safe moves, taking random move');
+                    await takeRandomMove(agentKnowledge);
+                }
+            } else {
+                await moveTo(optimalMove, agentPosition);
+            }
+
+            console.log(agentKnowledge)
+            await updateKnowledge()
+            await nextMove(agentKnowledge);
+        }
+
+        async function takeRandomMove(agentKnowledge) {
+            if (endedGame) return;
+            const adjacents = getAdjacentPositions(agentPosition);
+            const validMoves = adjacents.filter(pos => {
+                const { x, y } = pos;
+                return !agentKnowledge[x][y].potentialWumpus && !agentKnowledge[x][y].potentialPit;
+            });
+
+            if (validMoves.length > 0) {
+                const randomIndex = Math.floor(Math.random() * validMoves.length);
+                const randomMove = validMoves[randomIndex];
+                console.log(`Taking random move to x${randomMove.x}, y${randomMove.y}`);
+                await moveTo(randomMove, agentPosition);
+            } else {
+                console.log('No valid moves available, considering random cells');
+                const unvisitedMoves = adjacents.filter(pos => !agentKnowledge[pos.x][pos.y].visited);
+                if (unvisitedMoves.length > 0) {
+                    const randomIndex = Math.floor(Math.random() * unvisitedMoves.length);
+                    const randomMove = unvisitedMoves[randomIndex];
+                    console.log(`Taking random move to x${randomMove.x}, y${randomMove.y}`);
+                    await moveTo(randomMove, agentPosition);
+                } else {
+                    console.log('No moves available, going to visited places');
+                    const visitedMoves = adjacents.filter(pos => agentKnowledge[pos.x][pos.y].visited);
+                    const randomIndex = Math.floor(Math.random() * visitedMoves.length);
+                    const randomMove = visitedMoves[randomIndex];
+                    console.log(`Taking random move to visited x${randomMove.x}, y${randomMove.y}`);
+                    await moveTo(randomMove, agentPosition);
+                }
+            }
+        }
+
+        function getAdjacentPositions(position) {
+            const adjacents = [];
+            if (position.x > 0) adjacents.push({ x: position.x - 1, y: position.y });
+            if (position.x < SIZE - 1) adjacents.push({ x: position.x + 1, y: position.y });
+            if (position.y > 0) adjacents.push({ x: position.x, y: position.y - 1 });
+            if (position.y < SIZE - 1) adjacents.push({ x: position.x, y: position.y + 1 });
+            return adjacents;
+        }
+
+        function updateKnowledge() {
+
+            if (endedGame) return;
+            const x = agentPosition.x;
+            const y = agentPosition.y;
+
+            agentKnowledge[x][y].visited = true;
+            agentKnowledge[x][y].potentialPit = false
+            agentKnowledge[x][y].potentialWumpus = false
+
+            if (isAdjacentTo({ x, y }, wumpusPosition)) agentKnowledge[x][y].stench = true;
+            if (isAdjacentTo({ x, y }, goldPosition)) agentKnowledge[x][y].glitter = true;
+            if (isAdjacentToPit({ x, y })) agentKnowledge[x][y].breeze = true;
+
+            agentKnowledge[x][y].safe = true;
+
+            // Propagar informações de percepção
+            propagatePerception(x, y);
+        }
+
+        async function propagatePerception(x, y) {
+            if (endedGame) return;
+            const adjacents = getAdjacentPositions({ x, y });
+
+            adjacents.forEach(pos => {
+                if (agentKnowledge[pos.x][pos.y].visited) return;
+
+                if (agentKnowledge[x][y].glitter) {
+                    agentKnowledge[pos.x][pos.y].potentialGold = true;
+                }
+
+                if (agentKnowledge[x][y].stench) {
+                    if (isWumpusAlive) {
+                        const { foundInLine, directionLine } = checkForWumpusLines(x, y)
+                        const { foundInDiagonal, directionDiagonal } = checkForWumpusDiagonal(x, y)
+                        if (foundInLine) discoveredWumpus = { found: foundInLine, relativePosition: directionLine }
+                        else if (foundInDiagonal) discoveredWumpus = { found: foundInDiagonal, relativePosition: directionDiagonal }
+                        agentKnowledge[pos.x][pos.y].potentialWumpus = true;
+                    }
+                }
+
+                if (agentKnowledge[x][y].breeze) {
+                    if (!agentKnowledge[pos.x][pos.y].visited) agentKnowledge[pos.x][pos.y].potentialPit = true;
+                }
+
+                if (!agentKnowledge[x][y].stench && !agentKnowledge[x][y].breeze) {
+                    agentKnowledge[pos.x][pos.y].safe = true;
+                }
+            });
+        }
+
+        function isInbounds(x, y) {
+            return x >= 0 && x < SIZE && y >= 0 && y < SIZE;
+        }
+        function checkForWumpusDiagonal(x, y) {
+            if (!isWumpusAlive) return
+            if (isInbounds(x + 1, y - 1) && agentKnowledge[x + 1][y - 1].stench) {
+                console.log('found')
+
+            }
+            if (isInbounds(x + 1, y + 1) && agentKnowledge[x + 1][y + 1].stench) {
+                console.log('found')
+                console.log('if', x + 1, y + 1 - 1)
+                if (!agentKnowledge[x + 1][y + 1 - 1].safe || !agentKnowledge[x + 1][y + 1 - 1].visited) {
+                    console.log('found - right')
+                    return { foundInDiagonal: true, directionDiagonal: 'right' }
+                }
+                else {
+                    console.log('found - down')
+                    return { foundInDiagonal: true, directionDiagonal: 'down' }
+                }
+            }
+            if (isInbounds(x - 1, y + 1) && agentKnowledge[x - 1][y + 1].stench) {
+                console.log('found')
+                console.log('if', x - 1, y + 1 - 1)
+                if (!agentKnowledge[x - 1][y + 1 - 1].safe || !agentKnowledge[x - 1][y + 1 - 1].visited) {
+                    console.log('found - left')
+                    return { foundInDiagonal: true, directionDiagonal: 'left' }
+
+                }
+                else {
+                    console.log('found - down')
+                    return { foundInDiagonal: true, directionDiagonal: 'down' }
+                }
+            }
+            if (isInbounds(x - 1, y - 1) && agentKnowledge[x - 1][y - 1].stench) {
+                console.log('found')
+                console.log('if', x-1, y-1)
+                if(!agentKnowledge[x-1+1][y-1].safe || !agentKnowledge[x-1+1][y-1].visited) {
+                    console.log('found - right')
+                    return { foundInDiagonal: true, directionDiagonal: 'right' }
+                }
+                else {
+                    return { foundInDiagonal: true, directionDiagonal: 'down' }
+                }
+            }
+
+            return { foundInDiagonal: false, directionDiagonal: null }
+        }
+
+        function checkForWumpusLines(x, y) {
+            if (!isWumpusAlive) return
+
+            let directionToVerify = null
+            console.log('checking for wumpus around', x, y)
+
+            if (y >= 2) directionToVerify = 'above'
+            else directionToVerify = 'bellow'
+
+
+            console.log('v1', directionToVerify)
+            if (directionToVerify === 'above' && agentKnowledge[x][y - 2]?.stench) return { foundInLine: true, directionLine: 'up' }
+            if (directionToVerify === 'bellow' && agentKnowledge[x][y + 2]?.stench) return { foundInLine: true, directionLine: 'down' }
+
+            if (x >= 2) directionToVerify = 'left'
+            else directionToVerify = 'right'
+            console.log('v2', directionToVerify)
+
+            if (directionToVerify === 'left' && agentKnowledge[x - 2][y]?.stench) return { foundInLine: true, directionLine: 'left' }
+            if (directionToVerify === 'right' && agentKnowledge[x + 2][y]?.stench) return { foundInLine: true, directionLine: 'right' }
+
+            return { foundInLine: false, directionLine: null }
+        }
+
+
+
+
+
+
+
+        run()
+
+
+    </script>
+</body>
+
+</html>
